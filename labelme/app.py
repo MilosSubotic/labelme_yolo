@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+
 import enum
 import functools
 import json
@@ -64,6 +65,11 @@ from labelme.widgets import UniqueLabelQListWidget
 from labelme.widgets import ZoomWidget
 from labelme.widgets import download_ai_model
 from labelme.widgets import format_shape_label
+
+from labelme._label_file import YOLO_FILE_SUFFIX
+from labelme._label_file import is_yolo_file_path
+from labelme._label_file import read_yolo_txt_file
+
 
 from . import utils
 
@@ -1959,7 +1965,10 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _open_label_file_into_state(self, label_path: str) -> LabelData | None:
         try:
-            label_data = read_label_file(filename=label_path)
+            if is_yolo_file_path(filename=label_path):
+                label_data = read_yolo_txt_file(filename=label_path, image_width=0, image_height=0)
+            else:
+                label_data = read_label_file(filename=label_path)
         except LabelFileError as e:
             self._show_file_open_error(path=label_path, file_kind="label", exc=e)
             return None
@@ -2195,7 +2204,7 @@ class MainWindow(QtWidgets.QMainWindow):
             for fmt in QtGui.QImageReader.supportedImageFormats()
         ]
         filters = self.tr("Image & Label files (%s)") % " ".join(
-            formats + [f"*{LABEL_FILE_SUFFIX}"]
+            formats + [f"*{LABEL_FILE_SUFFIX}", f"*{YOLO_FILE_SUFFIX}"]
         )
         image_or_label_path, _ = QtWidgets.QFileDialog.getOpenFileName(
             self,
@@ -2462,7 +2471,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if not file_or_dir:
             raise ValueError("file_or_dir cannot be empty")
 
-        if is_label_file_path(filename=file_or_dir):
+        if is_label_file_path(filename=file_or_dir) or is_yolo_file_path(filename=file_or_dir):
             self._docks.file_list.clear()
             self._docks.file_dock.setEnabled(False)
             self._docks.file_dock.setToolTip(
@@ -2691,11 +2700,17 @@ def _format_window_title(
 
 
 def _resolve_label_path(*, image_or_label_path: str, output_dir: Path | None) -> str:
-    if is_label_file_path(filename=image_or_label_path):
+    if is_label_file_path(filename=image_or_label_path) or is_yolo_file_path(filename=image_or_label_path):
         return image_or_label_path
     image_path = Path(image_or_label_path)
     parent = output_dir if output_dir is not None else image_path.parent
-    return str(parent / f"{image_path.stem}{LABEL_FILE_SUFFIX}")
+    json_path = parent / f"{image_path.stem}{LABEL_FILE_SUFFIX}"
+    txt_path  = parent / f"{image_path.stem}{YOLO_FILE_SUFFIX}"
+    if json_path.exists():
+        return str(json_path)
+    if txt_path.exists():
+        return str(txt_path)
+    return str(json_path)  # default fallback
 
 
 def _make_image_list_item(

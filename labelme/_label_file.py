@@ -242,6 +242,55 @@ def read_label_file(filename: str) -> LabelData:
         other_data=other_data,
     )
 
+def _write_yolo_txt_file(
+    filename: str,
+    shapes: list[dict[str, Any]],
+    image_height: int,
+    image_width: int,
+    label_to_id: dict[str, int] | None = None,
+) -> None:
+    """Write YOLO polygon segmentation .txt file alongside the .json label file."""
+    if label_to_id is None:
+        seen: list[str] = []
+        for s in shapes:
+            lbl = s.get("label", "")
+            if lbl not in seen:
+                seen.append(lbl)
+        label_to_id = {lbl: i for i, lbl in enumerate(seen)}
+
+    txt_path = Path(filename).with_suffix(".txt")
+    lines: list[str] = []
+
+    for shape in shapes:
+        lbl = shape.get("label", "")
+        class_id = label_to_id.get(lbl)
+        if class_id is None:
+            logger.warning("Label {!r} not in label_to_id, skipping", lbl)
+            continue
+
+        shape_type = shape.get("shape_type", "polygon")
+        points: list[list[float]] = shape.get("points", [])
+
+        if not points:
+            continue
+
+        if shape_type in ("polygon", "rectangle", "linestrip"):
+            coords = []
+            for x, y in points:
+                coords.append(f"{x / image_width:.6f}")
+                coords.append(f"{y / image_height:.6f}")
+            lines.append(f"{class_id} " + " ".join(coords))
+        else:
+            logger.warning(
+                "shape_type={!r} not supported for YOLO export, skipping", shape_type
+            )
+
+    with open(txt_path, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines))
+        if lines:
+            f.write("\n")
+
+    logger.debug("Wrote YOLO polygon txt: {!r}", str(txt_path))
 
 def write_label_file(
     filename: str,
@@ -263,7 +312,6 @@ def write_label_file(
                 expected_width=image_width,
             )
             image_data_b64 = base64.b64encode(image_data).decode("utf-8")
-        # JSON keys stay camelCase: changing them would break existing .json files.
         payload: dict[str, Any] = {
             "version": __version__,
             "flags": dict(flags) if flags else {},
@@ -279,8 +327,100 @@ def write_label_file(
             payload[key] = value
         with open(filename, "w", encoding="utf-8") as f:
             json.dump(payload, f, ensure_ascii=False, indent=2)
+
+        # call .txt
+        if image_height is not None and image_width is not None:
+            _write_yolo_txt_file(
+                filename=filename,
+                shapes=shapes,
+                image_height=image_height,
+                image_width=image_width,
+            )
+
     except (OSError, TypeError, ValueError) as e:
         raise LabelFileWriteError(f"failed to write {filename!r}: {e}") from e
+
+YOLO_FILE_SUFFIX: Final[str] = ".txt"
+
+def is_yolo_file_path(filename: str) -> bool:
+    return Path(filename).suffix.lower() == YOLO_FILE_SUFFIX
+
+
+
+def read_yolo_txt_file(filename: str, *, image_width: int, image_height: int, id_to_label: dict[int, str] | None = None) -> LabelData:
+    """Read a YOLO .txt annotation file and return LabelData with polygon shapes."""
+    txt_path = Path(filename)
+    # Find the image next to the .txt
+    image_path: str | None = None
+    for ext in (".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff"):
+        candidate = txt_path.with_suffix(ext)
+        if candidate.exists():
+            image_path = candidate.name
+            image_data = read_image_file(filename=str(candidate))
+            # Get actual dimensions from image
+            img_pil = utils.img_data_to_pil(img_data=image_data)
+            image_width, image_height = img_pil.size  # (w, h)
+            break
+    if image_path is None:
+        raise LabelFileReadError(f"No image found next to {filename!r}")
+
+    shapes: list[ShapeDict] = []
+    try:
+        with open(filename, encoding="utf-8") as f:
+            lines = [l.strip() for l in f if l.strip()]
+    except OSError as e:
+        raise LabelFileReadError(f"failed to load {filename!r}: {e}") from e
+
+    for line in lines:
+        parts = line.split()
+        if len(parts) < 5 or (len(parts) > 5 and len(parts) % 2 == 0):
+            logger.warning("Skipping unexpected YOLO line: {!r}", line)
+            continue
+        class_id = int(parts[0])
+        coords = [float(v) for v in parts[1:]]
+        label = (id_to_label or {}).get(class_id, str(class_id))
+
+        if len(coords) == 4:
+            # YOLO bbox format: cx cy w h -> 4-point polygon
+            cx, cy, w, h = coords
+            x_min = (cx - w / 2) * image_width
+            x_max = (cx + w / 2) * image_width
+            y_min = (cy - h / 2) * image_height
+            y_max = (cy + h / 2) * image_height
+            points = [
+                [x_min, y_min],
+                [x_max, y_min],
+                [x_max, y_max],
+                [x_min, y_max],
+            ]
+            shape_type = "polygon"
+        else:
+            # YOLO polygon segmentation
+            points = [
+                [coords[i] * image_width, coords[i + 1] * image_height]
+                for i in range(0, len(coords), 2)
+            ]
+            shape_type = "polygon"
+
+        shapes.append(ShapeDict(
+            label=label,
+            points=points,
+            shape_type=shape_type,
+            flags={},
+            description="",
+            group_id=None,
+            mask=None,
+            other_data={},
+        ))
+
+    return LabelData(
+        image_path=image_path,
+        image_data=image_data,
+        shapes=shapes,
+        flags={},
+        other_data={},
+    )
+
 
 
 class LabelFile:
