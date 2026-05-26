@@ -1687,6 +1687,7 @@ class MainWindow(QtWidgets.QMainWindow):
             flags[item.text()] = item.checkState() == Qt.Checked
         try:
             assert self._image_path
+            logger.debug("Saving label to: {!r}", label_path)
             label_dir = Path(label_path).parent
             image_path = os.path.relpath(self._image_path, label_dir)
             image_data = self._image_data if self._config["with_image_data"] else None
@@ -1970,13 +1971,12 @@ class MainWindow(QtWidgets.QMainWindow):
             else:
                 label_data = read_label_file(filename=label_path)
         except LabelFileError as e:
+            # if YOLO txt is empty just load the pic
+            if is_yolo_file_path(filename=label_path):
+                logger.debug("Skipping invalid YOLO txt: {!r}", label_path)
+                return None
             self._show_file_open_error(path=label_path, file_kind="label", exc=e)
             return None
-        self._label_file_path = label_path
-        self._image_data = label_data.image_data
-        self._image_path = str(Path(label_path).parent / label_data.image_path)
-        self._other_data = label_data.other_data
-        return label_data
 
     def _open_image_into_state(self, image_path: str) -> bool:
         try:
@@ -2031,7 +2031,13 @@ class MainWindow(QtWidgets.QMainWindow):
         if QtCore.QFile.exists(label_path):
             label_data = self._open_label_file_into_state(label_path=label_path)
             if label_data is None:
-                return
+                # YOLO txt if empty just load the pic
+                if is_yolo_file_path(filename=label_path):
+                    logger.debug("Trying to open image: {!r}", image_or_label_path)
+                    if not self._open_image_into_state(image_path=image_or_label_path):
+                        return
+                else:
+                    return
         else:
             if not self._open_image_into_state(image_path=image_or_label_path):
                 return
@@ -2479,11 +2485,35 @@ class MainWindow(QtWidgets.QMainWindow):
             )
             self._load_file(image_or_label_path=file_or_dir)
         elif Path(file_or_dir).is_dir():
-            self._import_images_from_dir(
-                root_dir=file_or_dir, pattern=self._docks.file_search.text()
-            )
+            # Detect YOLO hierarchy: if 'images' subdir exists, use it and map to 'labels'
+            images_dir = Path(file_or_dir) / "images"
+            if images_dir.is_dir() and self._output_dir is None:
+                # Find corresponding labels dir
+                labels_dir = Path(file_or_dir) / "labels"
+                labels_dir.mkdir(parents=True, exist_ok=True)
+                self._output_dir = labels_dir
+                logger.info("YOLO hierarchy detected, output dir: {!r}", str(labels_dir))
+                self._import_images_from_dir(
+                    root_dir=str(images_dir),
+                    pattern=self._docks.file_search.text(),
+                )
+            else:
+                self._import_images_from_dir(
+                    root_dir=file_or_dir, pattern=self._docks.file_search.text()
+                )
             self._open_next_image()
         else:
+            # Single file — check if parent is inside images/ YOLO hierarchy
+            image_path = Path(file_or_dir)
+            parts = image_path.parts
+            if "images" in parts and self._output_dir is None:
+                idx = list(parts).index("images")
+                # labels dir mirrors images dir structure
+                labels_parts = list(parts[:idx]) + ["labels"] + list(parts[idx + 1:-1])
+                labels_dir = Path(*labels_parts)
+                labels_dir.mkdir(parents=True, exist_ok=True)
+                self._output_dir = labels_dir
+                logger.info("YOLO hierarchy detected, output dir: {!r}", str(labels_dir))
             self._import_images_from_dir(
                 root_dir=str(Path(file_or_dir).parent),
                 pattern=self._docks.file_search.text(),
@@ -2698,11 +2728,43 @@ def _format_window_title(
         title = f"{title}*"
     return title
 
+def _find_yolo_dataset_root(path: Path) -> Path | None:
+    """Walk up from path looking for a YOLO dataset root."""
+    for parent in [path, *path.parents]:
+        if (
+            (parent / "data.yaml").exists()
+            and (parent / "images").is_dir()
+            and (parent / "labels").is_dir()
+            and any(
+                (parent / "images" / split).is_dir()
+                for split in ("train", "valid", "test", "unsorted")
+            )
+        ):
+            return parent
+    return None
+
 
 def _resolve_label_path(*, image_or_label_path: str, output_dir: Path | None) -> str:
     if is_label_file_path(filename=image_or_label_path) or is_yolo_file_path(filename=image_or_label_path):
         return image_or_label_path
     image_path = Path(image_or_label_path)
+
+    # YOLO hierarchy changes images with labels in path
+    parts = list(image_path.parts)
+    if "images" in parts:
+        idx = parts.index("images")
+        label_parts = parts[:idx] + ["labels"] + parts[idx + 1:]
+        # json
+        json_path = Path(*label_parts).with_suffix(LABEL_FILE_SUFFIX)
+        # txt
+        txt_path = Path(*label_parts).with_suffix(YOLO_FILE_SUFFIX)
+        if json_path.exists():
+            return str(json_path)
+        if txt_path.exists():
+            return str(txt_path)
+        return str(json_path)  # fallback
+
+    # regular folder
     parent = output_dir if output_dir is not None else image_path.parent
     json_path = parent / f"{image_path.stem}{LABEL_FILE_SUFFIX}"
     txt_path  = parent / f"{image_path.stem}{YOLO_FILE_SUFFIX}"
@@ -2711,7 +2773,6 @@ def _resolve_label_path(*, image_or_label_path: str, output_dir: Path | None) ->
     if txt_path.exists():
         return str(txt_path)
     return str(json_path)  # default fallback
-
 
 def _make_image_list_item(
     *, image_path: str, output_dir: Path | None

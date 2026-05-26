@@ -350,6 +350,22 @@ def is_yolo_file_path(filename: str) -> bool:
 def read_yolo_txt_file(filename: str, *, image_width: int, image_height: int, id_to_label: dict[int, str] | None = None) -> LabelData:
     """Read a YOLO .txt annotation file and return LabelData with polygon shapes."""
     txt_path = Path(filename)
+
+    # check if YOLO txt file exists and has some content
+    try:
+        with open(filename, encoding="utf-8") as f:
+            lines = [l.strip() for l in f if l.strip()]
+    except OSError as e:
+        raise LabelFileReadError(f"failed to load {filename!r}: {e}") from e
+
+    # if there are no numbers not valid YOLO
+    has_valid_content = any(
+        len(line.split()) >= 5 and line.split()[0].isdigit()
+        for line in lines
+    )
+    if not has_valid_content:
+        raise LabelFileReadError(f"No valid YOLO content in {filename!r}")
+
     # Find the image next to the .txt
     image_path: str | None = None
     for ext in (".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff"):
@@ -357,9 +373,8 @@ def read_yolo_txt_file(filename: str, *, image_width: int, image_height: int, id
         if candidate.exists():
             image_path = candidate.name
             image_data = read_image_file(filename=str(candidate))
-            # Get actual dimensions from image
             img_pil = utils.img_data_to_pil(img_data=image_data)
-            image_width, image_height = img_pil.size  # (w, h)
+            image_width, image_height = img_pil.size
             break
     if image_path is None:
         raise LabelFileReadError(f"No image found next to {filename!r}")
