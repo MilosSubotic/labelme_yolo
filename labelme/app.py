@@ -2748,7 +2748,7 @@ def _find_yolo_dataset_root(path: Path) -> Path | None:
             and (parent / "labels").is_dir()
             and any(
                 (parent / "images" / split).is_dir()
-                for split in ("train", "valid", "test", "unsorted")
+                for split in ("train", "valid", "val" ,"test", "unsorted")
             )
         ):
             return parent

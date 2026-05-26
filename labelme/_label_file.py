@@ -4,6 +4,7 @@ import base64
 import io
 import json
 import time
+import yaml
 import warnings
 from dataclasses import dataclass
 from pathlib import Path
@@ -346,11 +347,42 @@ YOLO_FILE_SUFFIX: Final[str] = ".txt"
 def is_yolo_file_path(filename: str) -> bool:
     return Path(filename).suffix.lower() == YOLO_FILE_SUFFIX
 
+def _find_dataset_yaml(path: Path) -> Path | None:
+    """Walk up from path looking for data.yaml in a YOLO dataset root."""
+    for parent in [path, *path.parents]:
+        yaml_path = parent / "data.yaml"
+        if yaml_path.exists():
+            return yaml_path
+    return None
 
+
+def _load_class_names_from_yaml(yaml_path: Path) -> dict[int, str] | None:
+    """Parse data.yaml and return {class_id: class_name} mapping."""
+    try:
+        with open(yaml_path, encoding="utf-8") as f:
+            data = yaml.safe_load(f)
+        names = data.get("names")
+        if isinstance(names, list):
+            return {i: name for i, name in enumerate(names)}
+        if isinstance(names, dict):
+            return {int(k): str(v) for k, v in names.items()}
+    except Exception as e:
+        logger.warning("Failed to load class names from {!r}: {}", str(yaml_path), e)
+    return None
 
 def read_yolo_txt_file(filename: str, *, image_width: int, image_height: int, id_to_label: dict[int, str] | None = None) -> LabelData:
     """Read a YOLO .txt annotation file and return LabelData with polygon shapes."""
     txt_path = Path(filename)
+
+    # Auto-load class names from data.yaml if not provided
+    if id_to_label is None:
+        yaml_path = _find_dataset_yaml(txt_path.parent)
+        if yaml_path is not None:
+            id_to_label = _load_class_names_from_yaml(yaml_path)
+            if id_to_label:
+                logger.debug(
+                    "Loaded class names from {!r}: {}", str(yaml_path), id_to_label
+                )
 
     # check if YOLO txt file exists and has some content
     try:
