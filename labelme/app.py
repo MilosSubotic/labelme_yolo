@@ -1692,8 +1692,15 @@ class MainWindow(QtWidgets.QMainWindow):
             image_path = os.path.relpath(self._image_path, label_dir)
             image_data = self._image_data if self._config["with_image_data"] else None
             label_dir.mkdir(parents=True, exist_ok=True)
+            # U YOLO hijerarhiji cuva samo .txt, ne .json
+            from labelme._label_file import is_yolo_file_path as _is_yolo
+            save_path = label_path
+            if _is_yolo(filename=label_path):
+                save_path = label_path  # vec je .txt
+            elif "images" in Path(self._image_path).parts:
+                save_path = str(Path(label_path).with_suffix(".txt"))
             write_label_file(
-                filename=label_path,
+                filename=save_path,
                 shapes=shapes,
                 image_path=image_path,
                 image_data=image_data,
@@ -1977,6 +1984,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 return None
             self._show_file_open_error(path=label_path, file_kind="label", exc=e)
             return None
+        return label_data
 
     def _open_image_into_state(self, image_path: str) -> bool:
         try:
@@ -2037,6 +2045,9 @@ class MainWindow(QtWidgets.QMainWindow):
                     if not self._open_image_into_state(image_path=image_or_label_path):
                         return
                 else:
+                    return
+            else:
+                if not self._open_image_into_state(image_path=image_or_label_path):
                     return
         else:
             if not self._open_image_into_state(image_path=image_or_label_path):
@@ -2762,7 +2773,7 @@ def _resolve_label_path(*, image_or_label_path: str, output_dir: Path | None) ->
             return str(json_path)
         if txt_path.exists():
             return str(txt_path)
-        return str(json_path)  # fallback
+        return str(txt_path)  # fallback
 
     # regular folder
     parent = output_dir if output_dir is not None else image_path.parent

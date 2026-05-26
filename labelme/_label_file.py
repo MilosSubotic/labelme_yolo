@@ -325,8 +325,9 @@ def write_label_file(
             if key in _RESERVED_TOP_LEVEL_KEYS:
                 raise ValueError(f"reserved key in other_data: {key!r}")
             payload[key] = value
-        with open(filename, "w", encoding="utf-8") as f:
-            json.dump(payload, f, ensure_ascii=False, indent=2)
+        if not filename.endswith(".txt"):
+            with open(filename, "w", encoding="utf-8") as f:
+                json.dump(payload, f, ensure_ascii=False, indent=2)
 
         # call .txt
         if image_height is not None and image_width is not None:
@@ -366,10 +367,17 @@ def read_yolo_txt_file(filename: str, *, image_width: int, image_height: int, id
     if not has_valid_content:
         raise LabelFileReadError(f"No valid YOLO content in {filename!r}")
 
-    # Find the image next to the .txt
+    # Find the image - prvo pored .txt, pa u images/ YOLO hijerarhiji
     image_path: str | None = None
+    parts = list(txt_path.parts)
+    if "labels" in parts:
+        idx = parts.index("labels")
+        img_parts = parts[:idx] + ["images"] + parts[idx + 1:]
+        img_base = Path(*img_parts).with_suffix("")
+    else:
+        img_base = txt_path.with_suffix("")
     for ext in (".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff"):
-        candidate = txt_path.with_suffix(ext)
+        candidate = Path(str(img_base) + ext)
         if candidate.exists():
             image_path = candidate.name
             image_data = read_image_file(filename=str(candidate))
