@@ -4,7 +4,7 @@ SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 
 cd $SCRIPT_DIR
 
-sudo apt -y install \
+sudo -E apt -y install \
     python3-virtualenv \
     imagemagick \
     python3-pip \
@@ -21,6 +21,7 @@ pip install --upgrade pip
 # install in editable mode
 pip install -e .
 
+mkdir -p ~/.local/bin/
 cat > ~/.local/bin/labelme_yolo << EOF
 #!/bin/bash
 source ~/.local/opt/labelme/bin/activate
