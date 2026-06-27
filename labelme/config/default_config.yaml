@@ -99,7 +99,7 @@ shortcuts:
   create_point:
   create_linestrip:
   edit_shape: Ctrl+J
-  delete_shape: Delete
+  delete_shape: Shift+Delete
   duplicate_shape: Ctrl+D
   copy_shape: Ctrl+C
   paste_shape: Ctrl+V
@@ -107,7 +107,7 @@ shortcuts:
   undo_last_point: Ctrl+Z
   edit_label: Ctrl+E
   toggle_keep_prev_mode: Ctrl+P
-  remove_selected_point: [Meta+H, Backspace]
+  remove_selected_point: [Meta+H, Delete]
   show_all_shapes:
   hide_all_shapes:
   toggle_all_shapes: T
