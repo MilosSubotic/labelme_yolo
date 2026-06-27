@@ -114,6 +114,10 @@ class Canvas(QtWidgets.QWidget):
     _osam_session: OsamSession | None
     _ai_output_format: AiOutputFormat = "polygon"
 
+    _selected_vertices: dict[Shape, set[int]] = {}
+    _vertex_select_origin: QPointF | None = None
+    _vertex_select_rect: QRectF | None = None
+
     def __init__(self, *args: Any, **kwargs: Any) -> None:  # noqa: ANN401
         self._epsilon: float = kwargs.pop("epsilon", 10.0)
         self._double_click = kwargs.pop("double_click", "close")
@@ -540,6 +544,11 @@ class Canvas(QtWidgets.QWidget):
     def _continue_left_button_drag(
         self, pos: QPointF, event: QtGui.QMouseEvent
     ) -> None:
+        if self._vertex_select_origin is not None:
+            self._vertex_select_rect = QRectF(self._vertex_select_origin, pos).normalized()
+            self.update()
+            return
+
         is_shift_pressed = bool(event.modifiers() & Qt.ShiftModifier)
         if self._is_vertex_selected():
             self._drag_hovered_vertex(pos=pos, is_shift_pressed=is_shift_pressed)
@@ -840,6 +849,22 @@ class Canvas(QtWidgets.QWidget):
 
     def _press_left_while_editing(self, pos: QPointF, event: QtGui.QMouseEvent) -> None:
         modifiers = event.modifiers()
+
+        if modifiers == Qt.ControlModifier:
+            self._vertex_select_origin = pos
+
+            #TODO Debug
+
+            print('\n'*10)
+            print('-'*30)
+            print('_press_left_while_editing()')
+            print('self._vertex_select_origin = ', self._vertex_select_origin)
+
+
+            self._vertex_select_rect = QRectF(pos, pos)
+            self.update()
+            return
+        
         self._maybe_modify_polygon_topology(modifiers=modifiers)
         if self._is_rotation_point_selected():
             self._capture_rotation_anchors()
@@ -901,6 +926,13 @@ class Canvas(QtWidgets.QWidget):
         self.update()
 
     def _release_left(self) -> None:
+        if self._vertex_select_rect is not None:
+            self.select_vertices_in_rect(self._vertex_select_rect)
+            self._vertex_select_origin = None
+            self._vertex_select_rect = None
+            self.update()
+            return
+
         if self.mode != _CanvasMode.EDIT:
             return
         if self.hovered_shape is None:
@@ -1181,6 +1213,7 @@ class Canvas(QtWidgets.QWidget):
             super().paintEvent(a0)
             return
         self._render_canvas()
+        self._redner_selected()
         if self._current is not None:
             self._current.clear_highlight()
 
@@ -1193,6 +1226,54 @@ class Canvas(QtWidgets.QWidget):
                 layer(painter)
         finally:
             painter.end()
+
+    def _image_point_to_painter_point(self, p: QPointF) -> QPointF:
+        return QPointF(
+            p.x() * self.scale,
+            p.y() * self.scale,
+        )
+
+    def _image_rect_to_painter_rect(self, r: QRectF) -> QRectF:
+        r = r.normalized()
+        p0 = self._image_point_to_painter_point(r.topLeft())
+        p1 = self._image_point_to_painter_point(r.bottomRight())
+        return QRectF(p0, p1).normalized()
+
+    def _redner_selected(self) -> None:
+        painter: QtGui.QPainter = self._painter
+        painter.begin(self)
+        try:
+            self._setup_world_transform(painter=painter)
+
+            for shape, indices in self._selected_vertices.items():
+                for i in sorted(indices):
+                    if i >= len(shape.points):
+                        continue
+
+                    p = self._image_point_to_painter_point(shape.points[i])
+
+                    painter.setPen(QtGui.QPen(QtGui.QColor(255, 255, 0), 2))
+                    painter.setBrush(QtGui.QBrush(QtGui.QColor(255, 0, 0)))
+
+                    r = 4.0
+                    painter.drawEllipse(p, r, r)
+
+            if self._vertex_select_rect is not None:
+                rect = self._image_rect_to_painter_rect(self._vertex_select_rect)
+
+                painter.setPen(
+                    QtGui.QPen(
+                        QtGui.QColor(0, 255, 255),
+                        1,
+                        Qt.DashLine,
+                    )
+                )
+                painter.setBrush(Qt.NoBrush)
+                painter.drawRect(rect)
+
+        finally:
+            painter.end()
+
 
     def _setup_world_transform(self, painter: QtGui.QPainter) -> None:
         for hint in (
@@ -1429,6 +1510,9 @@ class Canvas(QtWidgets.QWidget):
     def keyPressEvent(self, a0: QtGui.QKeyEvent) -> None:
         modifiers = a0.modifiers()
         key = a0.key()
+        if key == Qt.Key_Delete and self._selected_vertices:
+            self.remove_selected_vertices()
+            return
         if self.mode == _CanvasMode.CREATE:
             if key == Qt.Key_Escape and self._current is not None:
                 self._cancel_current_shape()
@@ -1586,6 +1670,31 @@ class Canvas(QtWidgets.QWidget):
         self._last_hovered_rotation = None
         self.update()
 
+    def select_vertices_in_rect(self, rect: QRectF) -> None:
+        self._selected_vertices.clear()
+
+        for shape in self.shapes:
+            if not shape.visible:
+                continue
+
+            for i, p in enumerate(shape.points):
+                if rect.contains(p):
+                    self._selected_vertices.setdefault(shape, set()).add(i)
+
+    def remove_selected_vertices(self) -> None:
+        if not self._selected_vertices:
+            return
+
+        self.backup_shapes()
+
+        for shape, indices in list(self._selected_vertices.items()):
+            for i in sorted(indices, reverse=True):
+                if shape.can_remove_point():
+                    shape.remove_point(i)
+
+        self._selected_vertices.clear()
+        self.update()
+        self.shape_moved.emit()
 
 def _detections_from_annotations(
     annotations: list[osam.types.Annotation],
