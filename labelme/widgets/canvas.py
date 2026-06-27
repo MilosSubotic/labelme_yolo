@@ -853,14 +853,6 @@ class Canvas(QtWidgets.QWidget):
         if modifiers == Qt.ControlModifier:
             self._vertex_select_origin = pos
 
-            #TODO Debug
-
-            print('\n'*10)
-            print('-'*30)
-            print('_press_left_while_editing()')
-            print('self._vertex_select_origin = ', self._vertex_select_origin)
-
-
             self._vertex_select_rect = QRectF(pos, pos)
             self.update()
             return
@@ -1695,6 +1687,8 @@ class Canvas(QtWidgets.QWidget):
         self._selected_vertices.clear()
         self.update()
         self.shape_moved.emit()
+
+
 
 def _detections_from_annotations(
     annotations: list[osam.types.Annotation],
