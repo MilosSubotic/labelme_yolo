@@ -142,6 +142,7 @@ class _Actions(NamedTuple):
     undo: QtWidgets.QAction
     add_point_to_edge: QtWidgets.QAction
     remove_point: QtWidgets.QAction
+    split_polygon: QtWidgets.QAction
     create_mode: QtWidgets.QAction
     edit_mode: QtWidgets.QAction
     create_rectangle_mode: QtWidgets.QAction
@@ -474,6 +475,14 @@ class MainWindow(QtWidgets.QMainWindow):
             tip=self.tr("Remove selected point from polygon"),
             enabled=False,
         )
+        split_polygon = action(
+            text=self.tr("Split Polygon"),
+            slot=self.split_selected_polygon,
+            shortcut=shortcuts["split_selected_polygon"],
+            icon=None,
+            tip=self.tr("Split selected polygon by two selected vertices"),
+            enabled=True,
+        )
         add_point_to_edge = action(
             text=self.tr("Add Point to Edge"),
             slot=self._canvas_widgets.canvas.add_point_to_edge,
@@ -754,6 +763,7 @@ class MainWindow(QtWidgets.QMainWindow):
             undo_last_point,
             add_point_to_edge,
             remove_point,
+            split_polygon,
         )
         edit_menu = (
             edit,
@@ -766,6 +776,7 @@ class MainWindow(QtWidgets.QMainWindow):
             undo_last_point,
             None,
             remove_point,
+            split_polygon,
             None,
             keep_prev_action,
         )
@@ -789,6 +800,7 @@ class MainWindow(QtWidgets.QMainWindow):
             undo_last_point=undo_last_point,
             undo=undo,
             remove_point=remove_point,
+            split_polygon=split_polygon,
             add_point_to_edge=add_point_to_edge,
             create_mode=create_mode,
             edit_mode=edit_mode,
@@ -2457,6 +2469,10 @@ class MainWindow(QtWidgets.QMainWindow):
             if self.has_no_shapes():
                 for action in self._actions.on_shapes_present:
                     action.setEnabled(False)
+        self.mark_dirty()
+
+    def split_selected_polygon(self):
+        self._canvas_widgets.canvas.split_selected_polygon_by_two_vertices()
         self.mark_dirty()
 
     def delete_selected_shapes(self) -> None:

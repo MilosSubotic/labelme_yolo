@@ -1688,7 +1688,49 @@ class Canvas(QtWidgets.QWidget):
         self.update()
         self.shape_moved.emit()
 
+    def split_selected_polygon_by_two_vertices(self) -> None:
+        items = [
+            (shape, sorted(indices))
+            for shape, indices in self._selected_vertices.items()
+            if len(indices) == 2 and shape.shape_type == "polygon"
+        ]
 
+        if len(items) != 1:
+            return
+
+        shape, (i, j) = items[0]
+        points = shape.points
+
+        if len(points) < 4:
+            return
+
+        if i > j:
+            i, j = j, i
+
+        part1 = points[i:j + 1]
+        part2 = points[j:] + points[:i + 1]
+
+        if len(part1) < 3 or len(part2) < 3:
+            return
+
+        self.backup_shapes()
+
+        s1 = shape.copy()
+        s2 = shape.copy()
+        s1.points = [QPointF(p) for p in part1]
+        s2.points = [QPointF(p) for p in part2]
+        s1.point_labels = [1] * len(s1.points)
+        s2.point_labels = [1] * len(s2.points)
+
+        idx = self.shapes.index(shape)
+        self.shapes.pop(idx)
+        self.shapes.insert(idx, s2)
+        self.shapes.insert(idx, s1)
+
+        self._selected_vertices.clear()
+        self.selection_changed.emit([])
+        self.shape_moved.emit()
+        self.update()
 
 def _detections_from_annotations(
     annotations: list[osam.types.Annotation],
