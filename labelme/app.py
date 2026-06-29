@@ -2476,18 +2476,26 @@ class MainWindow(QtWidgets.QMainWindow):
         self.mark_dirty()
 
     def delete_selected_shapes(self) -> None:
-        yes, no = QtWidgets.QMessageBox.Yes, QtWidgets.QMessageBox.No
-        msg = self.tr(
-            "Permanently delete {} shapes? This action cannot be undone."
-        ).format(len(self._canvas_widgets.canvas.selected_shapes))
-        if yes == QtWidgets.QMessageBox.warning(
-            self, self.tr("Attention"), msg, yes | no, yes
-        ):
+        def delete_shapes():
             self.remove_labels(self._canvas_widgets.canvas.delete_selected())
             self.mark_dirty()
             if self.has_no_shapes():
                 for action in self._actions.on_shapes_present:
                     action.setEnabled(False)
+        if False:
+            # Confirm delete by yes/no dialog.
+            yes, no = QtWidgets.QMessageBox.Yes, QtWidgets.QMessageBox.No
+            msg = self.tr(
+                "Permanently delete {} shapes? This action cannot be undone."
+            ).format(len(self._canvas_widgets.canvas.selected_shapes))
+            if yes == QtWidgets.QMessageBox.warning(
+                self, self.tr("Attention"), msg, yes | no, yes
+            ):
+                delete_shapes()
+        else:
+            # Delete without yes/no dialog.
+            delete_shapes()
+
 
     def copy_shape(self) -> None:
         self._canvas_widgets.canvas.end_move(copy=True)
