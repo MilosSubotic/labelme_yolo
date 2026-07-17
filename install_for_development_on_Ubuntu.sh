@@ -4,6 +4,22 @@ SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 
 cd $SCRIPT_DIR
 
+# For Qt and it's backend
+sudo -E apt -y update
+sudo -E apt -y install \
+    libxcb-xinerama0 \
+    libqt5gui5 \
+    libx11-xcb1 \
+    libxcb-icccm4 \
+    libxcb-image0 \
+    libxcb-keysyms1 \
+    libxcb-randr0 \
+    libxcb-render-util0 \
+    libxcb-shape0 \
+    libxcb-util1 \
+    libxcb-xkb1 \
+    libxkbcommon-x11-0
+
 sudo -E apt -y install \
     python3-virtualenv \
     imagemagick \
