@@ -1720,8 +1720,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 image_width=self._image.width(),
                 other_data=self._other_data,
                 flags=flags,
-                label_to_id=self._yolo_label_to_id,#label_to_id,  # <-- Prosleđujemo fiksnu mapu ID-jeva
-                                                                  # dodajemo novi atribut 
+                label_to_id=self._yolo_label_to_id,
             )
             self._label_file_path = label_path
             items = self._docks.file_list.findItems(self._image_path, Qt.MatchExactly)
@@ -2513,6 +2512,18 @@ class MainWindow(QtWidgets.QMainWindow):
     def _load_from_file_or_dir(self, file_or_dir: str) -> None:
         if not file_or_dir:
             raise ValueError("file_or_dir cannot be empty")
+        def _load_classes_from_data_yaml(search_from : Path) -> None:
+            yaml_path = find_dataset_yaml(search_from)
+            if yaml_path is None:
+                return
+            id_to_label = load_class_names_from_yaml(yaml_path)
+            if not id_to_label:
+                return
+            for class_id in sorted(id_to_label):
+                self.add_unique_label(id_to_label[class_id])
+            self._yolo_label_to_id = {
+                label: class_id for class_id, label in id_to_label.items()
+    }
 
         if is_label_file_path(filename=file_or_dir) or is_yolo_file_path(filename=file_or_dir):
             self._docks.file_list.clear()
@@ -2531,25 +2542,20 @@ class MainWindow(QtWidgets.QMainWindow):
                 self._output_dir = labels_dir
                 logger.info("YOLO hierarchy detected, output dir: {!r}", str(labels_dir))
                 # Load all classes to Label List before loading label files.
-                yaml_path = find_dataset_yaml(Path(file_or_dir))
-                if yaml_path is not None:
-                    id_to_label = load_class_names_from_yaml(yaml_path)
-                    if id_to_label:
-                        # Add labels in class-id order (not file order), and
-                        # keep the id mapping around so that saving YOLO txt
-                        # files later reuses these same ids instead of
-                        # renumbering by shape order.
-
-                        #klase se dodaju u Label List po redosledu ID-a 
-                        #(sortirano po broju iz yaml-a, ne po redosledu iz fajla) 
-                        #— ovo rešava i bug sa redosledom i feature 
-                        #da se sve klase prikažu odmah;
-                        #popuni se self._yolo_label_to_id iz istog yaml-a.
-                        for class_id in sorted(id_to_label.keys()):
-                            self.add_unique_label(id_to_label[class_id])
-                        self._yolo_label_to_id = {
-                            label: class_id for class_id, label in id_to_label.items()
-                        }
+                # yaml_path = find_dataset_yaml(Path(file_or_dir))
+                # if yaml_path is not None:
+                #     id_to_label = load_class_names_from_yaml(yaml_path)
+                #     if id_to_label:
+                #         # Add labels in class-id order (not file order), and
+                #         # keep the id mapping around so that saving YOLO txt
+                #         # files later reuses these same ids instead of
+                #         # renumbering by shape order.
+                #         for class_id in sorted(id_to_label.keys()):
+                #             self.add_unique_label(id_to_label[class_id])
+                #         self._yolo_label_to_id = {
+                #             label: class_id for class_id, label in id_to_label.items()
+                #         }
+                _load_classes_from_data_yaml(Path(file_or_dir))
 
                 self._import_images_from_dir(
                     root_dir=str(images_dir),
@@ -2572,42 +2578,23 @@ class MainWindow(QtWidgets.QMainWindow):
                 labels_dir.mkdir(parents=True, exist_ok=True)
                 self._output_dir = labels_dir
                 logger.info("YOLO hierarchy detected, output dir: {!r}", str(labels_dir))
-                # Poziva funkciju iz _label_file.py koja ide unazad
-                # kroz roditeljske foldere od image_path 
-                # (for parent in [path, *path.parents]) i 
-                # traži prvi folder u kom postoji data.yaml. 
-                # Vraća Path do tog fajla ili None ako ga nema.
-                yaml_path = find_dataset_yaml(image_path)
-                if yaml_path is not None:
-                    id_to_label = load_class_names_from_yaml(yaml_path)
-                    # Ako je data.yaml pronađen, 
-                    # parsira ga (yaml.safe_load) i 
-                    # čita polje names:.
-                    if id_to_label:
-                        for class_id in sorted(id_to_label.keys()):
-                            self.add_unique_label(id_to_label[class_id])
-                            #sorted(id_to_label) sortira ključeve 
-                            # (0, 1, 2 — po ID-u, ne po redosledu iz fajla).
-                            # Za svaki ID, poziva postojeću metodu add_unique_label(label),
-                            # koja dodaje label u unique_label_list ako već nije tu
-                            # Rezultat: čim se otvori slika, 
-                            # Label List odmah sadrži klase iz data.yaml
-                            # raspberry, blueberry, blackberry
-                            # u tom tačnom redosledu 
-                            # — bez obzira da li .txt fajl 
-                            # uz tu sliku postoji ili sadrži samo jednu liniju.
-                        self._yolo_label_to_id = {
-                            label: class_id for class_id, label in id_to_label.items()
-                        }
-                            # Ovo pravi obrnuti rečnik 
-                            # i čuva ga na instanci prozora
-                            # Ovaj rečnik se kasnije koristi u save_labels()
-                            # kad se poziva write_label_file 
-                            # tako da se pri svakom snimanju YOLO .txt fajla
-                            # koriste ovi fiksni ID-jevi iz data.yaml, 
-                            # a ne ID-jevi izračunati iznova 
-                            # iz trenutnog redosleda shape-ova 
-                            #(što je bio uzrok mešanja klasa).
+                # yaml_path = find_dataset_yaml(image_path)
+                # if yaml_path is not None:
+                #     id_to_label = load_class_names_from_yaml(yaml_path)
+                #     # If data.yaml is found, 
+                #     # parse (yaml.safe_load) and 
+                #     # read names:.
+                #     if id_to_label:
+                #         for class_id in sorted(id_to_label.keys()):
+                #             self.add_unique_label(id_to_label[class_id])
+                #             #sorted(id_to_label) sorts keys 
+                #             # (0, 1, 2 — by ID, not by order in file).
+                #             # For every ID, calls add_unique_label(label),
+                #             # which adds label in unique_label_list if not there
+                #         self._yolo_label_to_id = {
+                #             label: class_id for class_id, label in id_to_label.items()
+                #         }
+                _load_classes_from_data_yaml(image_path)
 
             self._import_images_from_dir(
                 root_dir=str(Path(file_or_dir).parent),
