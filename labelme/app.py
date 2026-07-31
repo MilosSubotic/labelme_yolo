@@ -69,6 +69,8 @@ from labelme.widgets import format_shape_label
 from labelme._label_file import YOLO_FILE_SUFFIX
 from labelme._label_file import is_yolo_file_path
 from labelme._label_file import read_yolo_txt_file
+from labelme._label_file import find_dataset_yaml #1.dodato
+from labelme._label_file import load_class_names_from_yaml #1.dodato
 
 
 from . import utils
@@ -204,6 +206,7 @@ class MainWindow(QtWidgets.QMainWindow):
     _ai_text: AiTextToAnnotationWidget
 
     _output_dir: Path | None
+    _yolo_label_to_id: dict[str, int] | None #dodato
     _image: QtGui.QImage
     _image_data: bytes | None
     _label_file_path: str | None
@@ -1006,6 +1009,7 @@ class MainWindow(QtWidgets.QMainWindow):
         output_dir: str | None,
     ) -> None:
         self._output_dir = Path(output_dir) if output_dir else None
+        self._yolo_label_to_id = None # dodamo novi atribut koji se cuva u MainWindow
 
         self._image = QtGui.QImage()
         self._label_file_path = None
@@ -1549,14 +1553,7 @@ class MainWindow(QtWidgets.QMainWindow):
             assert shape.label is not None
             item.setText(format_shape_label(shape))
             self.mark_dirty()
-            if self._docks.unique_label_list.find_label_item(shape.label) is None:
-                self._docks.unique_label_list.add_label_item(
-                    label=shape.label,
-                    color=self._get_rgb_by_label(
-                        label=shape.label,
-                        unique_label_list=self._docks.unique_label_list,
-                    ),
-                )
+            self.add_unique_label(shape.label)
 
     def _on_file_search_changed(self) -> None:
         self._import_images_from_dir(
@@ -1593,18 +1590,21 @@ class MainWindow(QtWidgets.QMainWindow):
         self._actions.copy.setEnabled(n_selected)
         self._actions.edit.setEnabled(n_selected)
 
+    def add_unique_label(self, label):
+        if self._docks.unique_label_list.find_label_item(label) is None:
+            self._docks.unique_label_list.add_label_item(
+                label=label,
+                color=self._get_rgb_by_label(
+                    label=label,
+                    unique_label_list=self._docks.unique_label_list,
+                ),
+            )
+
     def add_label(self, shape: Shape) -> None:
         assert shape.label is not None
         label_list_item = LabelListWidgetItem(shape=shape)
         self._docks.label_list.add_item(label_list_item)
-        if self._docks.unique_label_list.find_label_item(shape.label) is None:
-            self._docks.unique_label_list.add_label_item(
-                label=shape.label,
-                color=self._get_rgb_by_label(
-                    label=shape.label,
-                    unique_label_list=self._docks.unique_label_list,
-                ),
-            )
+        self.add_unique_label(shape.label)
         self._label_dialog.add_label_history(shape.label)
         for action in self._actions.on_shapes_present:
             action.setEnabled(True)
@@ -1720,6 +1720,8 @@ class MainWindow(QtWidgets.QMainWindow):
                 image_width=self._image.width(),
                 other_data=self._other_data,
                 flags=flags,
+                label_to_id=self._yolo_label_to_id,#label_to_id,  # <-- Prosleđujemo fiksnu mapu ID-jeva
+                                                                  # dodajemo novi atribut 
             )
             self._label_file_path = label_path
             items = self._docks.file_list.findItems(self._image_path, Qt.MatchExactly)
@@ -2528,6 +2530,27 @@ class MainWindow(QtWidgets.QMainWindow):
                 labels_dir.mkdir(parents=True, exist_ok=True)
                 self._output_dir = labels_dir
                 logger.info("YOLO hierarchy detected, output dir: {!r}", str(labels_dir))
+                # Load all classes to Label List before loading label files.
+                yaml_path = find_dataset_yaml(Path(file_or_dir))
+                if yaml_path is not None:
+                    id_to_label = load_class_names_from_yaml(yaml_path)
+                    if id_to_label:
+                        # Add labels in class-id order (not file order), and
+                        # keep the id mapping around so that saving YOLO txt
+                        # files later reuses these same ids instead of
+                        # renumbering by shape order.
+
+                        #klase se dodaju u Label List po redosledu ID-a 
+                        #(sortirano po broju iz yaml-a, ne po redosledu iz fajla) 
+                        #— ovo rešava i bug sa redosledom i feature 
+                        #da se sve klase prikažu odmah;
+                        #popuni se self._yolo_label_to_id iz istog yaml-a.
+                        for class_id in sorted(id_to_label.keys()):
+                            self.add_unique_label(id_to_label[class_id])
+                        self._yolo_label_to_id = {
+                            label: class_id for class_id, label in id_to_label.items()
+                        }
+
                 self._import_images_from_dir(
                     root_dir=str(images_dir),
                     pattern=self._docks.file_search.text(),
@@ -2549,6 +2572,43 @@ class MainWindow(QtWidgets.QMainWindow):
                 labels_dir.mkdir(parents=True, exist_ok=True)
                 self._output_dir = labels_dir
                 logger.info("YOLO hierarchy detected, output dir: {!r}", str(labels_dir))
+                # Poziva funkciju iz _label_file.py koja ide unazad
+                # kroz roditeljske foldere od image_path 
+                # (for parent in [path, *path.parents]) i 
+                # traži prvi folder u kom postoji data.yaml. 
+                # Vraća Path do tog fajla ili None ako ga nema.
+                yaml_path = find_dataset_yaml(image_path)
+                if yaml_path is not None:
+                    id_to_label = load_class_names_from_yaml(yaml_path)
+                    # Ako je data.yaml pronađen, 
+                    # parsira ga (yaml.safe_load) i 
+                    # čita polje names:.
+                    if id_to_label:
+                        for class_id in sorted(id_to_label.keys()):
+                            self.add_unique_label(id_to_label[class_id])
+                            #sorted(id_to_label) sortira ključeve 
+                            # (0, 1, 2 — po ID-u, ne po redosledu iz fajla).
+                            # Za svaki ID, poziva postojeću metodu add_unique_label(label),
+                            # koja dodaje label u unique_label_list ako već nije tu
+                            # Rezultat: čim se otvori slika, 
+                            # Label List odmah sadrži klase iz data.yaml
+                            # raspberry, blueberry, blackberry
+                            # u tom tačnom redosledu 
+                            # — bez obzira da li .txt fajl 
+                            # uz tu sliku postoji ili sadrži samo jednu liniju.
+                        self._yolo_label_to_id = {
+                            label: class_id for class_id, label in id_to_label.items()
+                        }
+                            # Ovo pravi obrnuti rečnik 
+                            # i čuva ga na instanci prozora
+                            # Ovaj rečnik se kasnije koristi u save_labels()
+                            # kad se poziva write_label_file 
+                            # tako da se pri svakom snimanju YOLO .txt fajla
+                            # koriste ovi fiksni ID-jevi iz data.yaml, 
+                            # a ne ID-jevi izračunati iznova 
+                            # iz trenutnog redosleda shape-ova 
+                            #(što je bio uzrok mešanja klasa).
+
             self._import_images_from_dir(
                 root_dir=str(Path(file_or_dir).parent),
                 pattern=self._docks.file_search.text(),

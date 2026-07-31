@@ -252,12 +252,20 @@ def _write_yolo_txt_file(
 ) -> None:
     """Write YOLO polygon segmentation .txt file alongside the .json label file."""
     if label_to_id is None:
+        # No stable mapping was supplied (e.g. no data.yaml found): fall back
+        # to numbering labels by first appearance in this save. This is what
+        # caused ids to "shuffle" between saves, since shape order can change
+        # as shapes are edited/reloaded.
         seen: list[str] = []
         for s in shapes:
             lbl = s.get("label", "")
             if lbl not in seen:
                 seen.append(lbl)
         label_to_id = {lbl: i for i, lbl in enumerate(seen)}
+        #_write_yolo_txt_file svaki put kad se sacuva iznova racuna ID 
+        #koji ide uz koji label - na osnovu redosleda pojavljivanja labela u trenutnoj listi shape-ova
+        #Problem:taj redosled ne mora da odgovara redosledu iz data.yaml niti ostaje izmedju snimanja
+        #zato se ID-jevi mesaju cim pomerimo shape i snimimo ponovo
 
     txt_path = Path(filename).with_suffix(".txt")
     lines: list[str] = []
@@ -266,8 +274,17 @@ def _write_yolo_txt_file(
         lbl = shape.get("label", "")
         class_id = label_to_id.get(lbl)
         if class_id is None:
-            logger.warning("Label {!r} not in label_to_id, skipping", lbl)
-            continue
+            # New label not present in the stable mapping (e.g. not in
+            # data.yaml yet): assign it the next free id and remember it,
+            # so it keeps the same id on every future save instead of
+            # being dropped or renumbered.
+            class_id = (max(label_to_id.values()) + 1) if label_to_id else 0 # ovo je dodato
+            label_to_id[lbl] = class_id #ovo je dodato
+
+            #logger.warning("Label {!r} not in label_to_id, skipping", lbl)
+            logger.error("Label {!r} is not in data.yaml, assigning new id={}", lbl, class_id)
+
+            #continue
 
         shape_type = shape.get("shape_type", "polygon")
         points: list[list[float]] = shape.get("points", [])
@@ -303,6 +320,7 @@ def write_label_file(
     image_data: bytes | None = None,
     other_data: dict[str, Any] | None = None,
     flags: dict[str, bool] | None = None,
+    label_to_id: dict[str, int] | None = None, #1.dobija opcioni parametar
 ) -> None:
     try:
         image_data_b64: str | None = None
@@ -337,6 +355,9 @@ def write_label_file(
                 shapes=shapes,
                 image_height=image_height,
                 image_width=image_width,
+                label_to_id=label_to_id, #2.prosledjuje ga dalje u _write_yolo_txt_file
+                                         #_write_yolo_txt_file sad koristi ovaj stabilan mapping
+                                         #ako je prosledjen, umesto da ga svaki put racuna iznova
             )
 
     except (OSError, TypeError, ValueError) as e:
@@ -369,6 +390,11 @@ def _load_class_names_from_yaml(yaml_path: Path) -> dict[int, str] | None:
     except Exception as e:
         logger.warning("Failed to load class names from {!r}: {}", str(yaml_path), e)
     return None
+# 3.Public aliases (the leading-underscore versions above are kept for
+# internal use within this module).
+find_dataset_yaml = _find_dataset_yaml
+load_class_names_from_yaml = _load_class_names_from_yaml
+
 
 def read_yolo_txt_file(filename: str, *, image_width: int, image_height: int, id_to_label: dict[int, str] | None = None) -> LabelData:
     """Read a YOLO .txt annotation file and return LabelData with polygon shapes."""
