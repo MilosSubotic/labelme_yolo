@@ -255,7 +255,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self._label_dialog = LabelDialog(
             parent=self,
-            labels=self._config["labels"],
+            labels=self._config["labels"], #takes labels list from config file, not data yaml
             sort_labels=self._config["sort_labels"],
             show_text_field=self._config["show_label_text_field"],
             completion=self._config["label_completion"],
@@ -1605,7 +1605,7 @@ class MainWindow(QtWidgets.QMainWindow):
         label_list_item = LabelListWidgetItem(shape=shape)
         self._docks.label_list.add_item(label_list_item)
         self.add_unique_label(shape.label)
-        self._label_dialog.add_label_history(shape.label)
+        self._label_dialog.add_label_history(shape.label) # calls every shape that loads on image, "popup" "learns" new labels only when the shape is on the image, not all classes that are in data yaml
         for action in self._actions.on_shapes_present:
             action.setEnabled(True)
 
@@ -2520,7 +2520,8 @@ class MainWindow(QtWidgets.QMainWindow):
             if not id_to_label:
                 return
             for class_id in sorted(id_to_label):
-                self.add_unique_label(id_to_label[class_id])
+                self.add_unique_label(id_to_label[class_id]) #loads every class from data yaml for sidebar
+                self._label_dialog.add_label_history(id_to_label[class_id]) # loads every class in data yaml for popup
             self._yolo_label_to_id = {
                 label: class_id for class_id, label in id_to_label.items()
     }
@@ -2552,6 +2553,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 #         # renumbering by shape order.
                 #         for class_id in sorted(id_to_label.keys()):
                 #             self.add_unique_label(id_to_label[class_id])
+
                 #         self._yolo_label_to_id = {
                 #             label: class_id for class_id, label in id_to_label.items()
                 #         }
