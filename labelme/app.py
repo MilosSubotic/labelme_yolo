@@ -2564,6 +2564,8 @@ class MainWindow(QtWidgets.QMainWindow):
                     pattern=self._docks.file_search.text(),
                 )
             else:
+                _load_classes_from_data_yaml(Path(file_or_dir)) # find data.yaml walking through directories
+
                 self._import_images_from_dir(
                     root_dir=file_or_dir, pattern=self._docks.file_search.text()
                 )
